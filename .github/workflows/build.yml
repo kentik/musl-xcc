@@ -1,0 +1,61 @@
+name: build
+
+on:
+  push:
+    branches: "*"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        target:
+          - aarch64-linux-musl
+          - armv7-linux-musleabihf
+          - x86_64-linux-musl
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          submodules: true
+      - run: |
+          cp config.mak musl-cross-make
+          make -C musl-cross-make         2>&1 >> build-$TARGET.log
+          make -C musl-cross-make install 2>&1 >> build-$TARGET.log
+          tar -czvf xcc-$TARGET.tar.gz /opt/xcc
+        env:
+          TARGET: ${{ matrix.target }}
+      - uses: actions/upload-artifact@v3
+        with:
+          name: xcc-${{ matrix.target }}.tar.gz
+          path: xcc-${{ matrix.target }}.tar.gz
+      - uses: actions/upload-artifact@v3
+        with:
+          name: build-${{ matrix.target }}.log
+          path: build-${{ matrix.target }}.log
+
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+      - uses: actions/github-script@v6
+        with:
+          script: |
+            const version = context.sha.substring(0, 8);
+
+            github.rest.git.createRef({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              ref:   `refs/tags/${version}`,
+              sha:   context.sha
+            });
+
+            core.setOutput('version', version);
+        id: create-tag
+      - uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.create-tag.outputs.version }}
+          files: artifacts/**/*.tar.gz
+    needs: build
